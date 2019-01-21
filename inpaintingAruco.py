@@ -444,7 +444,14 @@ if __name__ == "__main__":
             if 0 <= row < 1080 and 0 <= col < 1920:
                 nPointsWithColour = nPointsWithColour + 1
 
-        file_object = open(cloudFiles[i].split('.')[0] + '_with_colour.ply', "w")
+        import os
+        directory = 'ColouredClouds'
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+
+        name = (cloudFiles[i].split('.')[0]).split('/')[-1]
+
+        file_object = open(directory + '/' + name + '_with_colour.ply', "w")
 
         # write file header information
         file_object.write('ply' + '\n')

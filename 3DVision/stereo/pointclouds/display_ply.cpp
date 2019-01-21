@@ -38,72 +38,72 @@ int main(int argc, char **argv)
 {
      /* Read Point Cloud files */
     PointCloud<PointXYZRGB>::Ptr cloud_0 (new PointCloud<PointXYZRGB>);
-    if(io::loadPLYFile<PointXYZRGB> ("..//Depth_Images//pixelcolor0.ply", *cloud_0) == -1) //* load the file
+    if(io::loadPLYFile<PointXYZRGB> ("..//Depth_Images//00000000_with_color.ply", *cloud_0) == -1) //* load the file
     {
-      PCL_ERROR ("Couldn't read file pixelcolor0.ply \n");
+      PCL_ERROR ("Couldn't read file 00000000_with_color.ply \n");
       return (-1);
     }
 
     PointCloud<PointXYZRGB>::Ptr cloud_1 (new PointCloud<PointXYZRGB>);
-    if (io::loadPLYFile<PointXYZRGB> ("..//Depth_Images//pixelcolor1.ply", *cloud_1) == -1) //* load the file
+    if (io::loadPLYFile<PointXYZRGB> ("..//Depth_Images//00000001_with_color.ply", *cloud_1) == -1) //* load the file
     {
-      PCL_ERROR ("Couldn't read file pixelcolor1.ply \n");
+      PCL_ERROR ("Couldn't read file 00000001_with_color.ply \n");
       return (-1);
     }
 
     PointCloud<PointXYZRGB>::Ptr cloud_2 (new PointCloud<PointXYZRGB>);
-    if(io::loadPLYFile<PointXYZRGB> ("..//Depth_Images//pixelcolor2.ply", *cloud_2) == -1) //* load the file
+    if(io::loadPLYFile<PointXYZRGB> ("..//Depth_Images//00000002_with_color.ply", *cloud_2) == -1) //* load the file
     {
-      PCL_ERROR ("Couldn't read file pixelcolor2.ply \n");
+      PCL_ERROR ("Couldn't read file 00000002_with_color.ply \n");
       return (-1);
     }
     
     PointCloud<PointXYZRGB>::Ptr cloud_3 (new PointCloud<PointXYZRGB>);
-    if (io::loadPLYFile<PointXYZRGB> ("..//Depth_Images//pixelcolor3.ply", *cloud_3) == -1) //* load the file
+    if (io::loadPLYFile<PointXYZRGB> ("..//Depth_Images//00000003_with_color.ply", *cloud_3) == -1) //* load the file
     {
-      PCL_ERROR ("Couldn't read file pixelcolor3.ply \n");
+      PCL_ERROR ("Couldn't read file 00000003_with_color.ply \n");
       return (-1);
     }
     
     PointCloud<PointXYZRGB>::Ptr cloud_4 (new PointCloud<PointXYZRGB>);
-    if(io::loadPLYFile<PointXYZRGB> ("..//Depth_Images//pixelcolor4.ply", *cloud_4) == -1) //* load the file
+    if(io::loadPLYFile<PointXYZRGB> ("..//Depth_Images//00000004_with_color.ply", *cloud_4) == -1) //* load the file
     {
-      PCL_ERROR ("Couldn't read file pixelcolor4.ply \n");
+      PCL_ERROR ("Couldn't read file 00000004_with_color.ply \n");
       return (-1);
     }
     
     PointCloud<PointXYZRGB>::Ptr cloud_5 (new PointCloud<PointXYZRGB>);
-    if (io::loadPLYFile<PointXYZRGB> ("..//Depth_Images//pixelcolor5.ply", *cloud_5) == -1) //* load the file
+    if (io::loadPLYFile<PointXYZRGB> ("..//Depth_Images//00000005_with_color.ply", *cloud_5) == -1) //* load the file
     {
-      PCL_ERROR ("Couldn't read file pixelcolor5.ply \n");
+      PCL_ERROR ("Couldn't read file 00000005_with_color.ply \n");
       return (-1);
     }
     
     PointCloud<PointXYZRGB>::Ptr cloud_6 (new PointCloud<PointXYZRGB>);
-    if(io::loadPLYFile<PointXYZRGB> ("..//Depth_Images//pixelcolor6.ply", *cloud_6) == -1) //* load the file
+    if(io::loadPLYFile<PointXYZRGB> ("..//Depth_Images//00000006_with_color.ply", *cloud_6) == -1) //* load the file
     {
-      PCL_ERROR ("Couldn't read file pixelcolor6.ply \n");
+      PCL_ERROR ("Couldn't read file 00000006_with_color.ply \n");
       return (-1);
     }
     
     PointCloud<PointXYZRGB>::Ptr cloud_7 (new PointCloud<PointXYZRGB>);
-    if (io::loadPLYFile<PointXYZRGB> ("..//Depth_Images//pixelcolor7.ply", *cloud_7) == -1) //* load the file
+    if (io::loadPLYFile<PointXYZRGB> ("..//Depth_Images//00000007_with_color.ply", *cloud_7) == -1) //* load the file
     {
-      PCL_ERROR ("Couldn't read file pixelcolor7.ply \n");
+      PCL_ERROR ("Couldn't read file 00000007_with_color.ply \n");
       return (-1);
     }
     
     PointCloud<PointXYZRGB>::Ptr cloud_8 (new PointCloud<PointXYZRGB>);
-    if(io::loadPLYFile<PointXYZRGB> ("..//Depth_Images//pixelcolor8.ply", *cloud_8) == -1) //* load the file
+    if(io::loadPLYFile<PointXYZRGB> ("..//Depth_Images//00000008_with_color.ply", *cloud_8) == -1) //* load the file
     {
-      PCL_ERROR ("Couldn't read file pixelcolor8.ply \n");
+      PCL_ERROR ("Couldn't read file 00000008_with_color.ply \n");
       return (-1);
     }
     
     PointCloud<PointXYZRGB>::Ptr cloud_9 (new PointCloud<PointXYZRGB>);
-    if(io::loadPLYFile<PointXYZRGB> ("..//Depth_Images//pixelcolor9.ply", *cloud_9) == -1) //* load the file
+    if(io::loadPLYFile<PointXYZRGB> ("..//Depth_Images//00000009_with_color.ply", *cloud_9) == -1) //* load the file
     {
-      PCL_ERROR ("Couldn't read file pixelcolor9.ply \n");
+      PCL_ERROR ("Couldn't read file 00000009_with_color.ply \n");
       return (-1);
     }
     

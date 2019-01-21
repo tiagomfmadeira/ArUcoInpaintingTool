@@ -62,6 +62,53 @@ def drawMask(img, imgpts):
 
 
 
+def projectToCamera(intrinsic_matrix, distortion, width, height, pts):
+    """
+    Projects a list of points to the camera defined transform, intrinsics and distortion
+    :param intrinsic_matrix: 3x3 intrinsic camera matrix
+    :param distortion: should be as follows: (k_1, k_2, p_1, p_2[, k_3[, k_4, k_5, k_6]])
+    :param width: the image width
+    :param height: the image height
+    :param pts: a list of point coordinates (in the camera frame) with the following format
+    :return: a list of pixel coordinates with the same lenght as pts
+    """
+
+    _, n_pts = pts.shape
+
+    # Project the 3D points in the camera's frame to image pixels
+    # From https://docs.opencv.org/2.4/modules/calib3d/doc/camera_calibration_and_3d_reconstruction.html
+    pixs = np.zeros((2, n_pts), dtype=np.int)
+
+    k1, k2, p1, p2, k3 = distortion
+    # fx, _, cx, _, fy, cy, _, _, _ = intrinsic_matrix
+    fx = intrinsic_matrix[0, 0]
+    fy = intrinsic_matrix[1, 1]
+    cx = intrinsic_matrix[0, 2]
+    cy = intrinsic_matrix[1, 2]
+
+    x = pts[0, :]
+    y = pts[1, :]
+    z = pts[2, :]
+
+    dists = norm(pts[0:3, :], axis=0)  # compute distances from point to camera
+    xl = np.divide(x, z)  # compute homogeneous coordinates
+    yl = np.divide(y, z)  # compute homogeneous coordinates
+    r2 = xl ** 2 + yl ** 2  # r square (used multiple times bellow)
+    xll = xl * (1 + k1 * r2 + k2 * r2 ** 2 + k3 * r2 ** 3) + 2 * p1 * xl * yl + p2 * (r2 + 2 * xl ** 2)
+    yll = yl * (1 + k1 * r2 + k2 * r2 ** 2 + k3 * r2 ** 3) + p1 * (r2 + 2 * yl ** 2) + 2 * p2 * xl * yl
+    pixs[0, :] = fx * xll + cx
+    pixs[1, :] = fy * yll + cy
+
+    # Compute mask of valid projections
+    valid_z = z > 0
+    valid_xpix = np.logical_and(pixs[0, :] >= 0, pixs[0, :] < width)
+    valid_ypix = np.logical_and(pixs[1, :] >= 0, pixs[1, :] < height)
+    valid_pixs = np.logical_and(valid_z, np.logical_and(valid_xpix, valid_ypix))
+
+    return pixs, valid_pixs, dists
+
+
+
 # -------------------------------------------------------------------------------
 # --- MAIN
 # -------------------------------------------------------------------------------
@@ -139,6 +186,7 @@ if __name__ == "__main__":
     dataset_arucos.distortion = np.array(dataset_cameras.cameras[0].rgb.camera_info.D)
     dataset_arucos.intrinsics = np.reshape(dataset_cameras.cameras[0].rgb.camera_info.K, (3, 3))
     dataset_arucos.world_T_aruco = {}
+    dataset_arucos.aruco_T_world = {}
 
     # For each camera
     for i, camera in enumerate(dataset_cameras.cameras):
@@ -179,9 +227,7 @@ if __name__ == "__main__":
             center = (np.average(x), np.average(y))
 
             rodrigues = np.array(rotationVecs[j][0])
-
             translation = np.array(translationVecs[j][0])
-
             aruco2camera = traslationRodriguesToTransform(translation, rodrigues)
 
             camera2aruco = np.linalg.inv(aruco2camera)
@@ -191,8 +237,10 @@ if __name__ == "__main__":
 
             # Add only if there is still not an estimate (made by another camera)
             if id not in dataset_arucos.world_T_aruco:
-                dataset_arucos.world_T_aruco[id] = np.dot(camera.rgb.matrix,
-                                                          np.linalg.inv(camera.rgb.arucos[id].camera2aruco))
+                dataset_arucos.world_T_aruco[id] = np.dot(camera.rgb.matrix, camera.rgb.arucos[id].camera2aruco)
+
+            if id not in dataset_arucos.aruco_T_world:
+                dataset_arucos.aruco_T_world[id] = np.dot(camera.rgb.matrix, camera.rgb.arucos[id].aruco2camera)
 
     # Display information over the ArUcos
     font = cv.FONT_HERSHEY_SIMPLEX
@@ -222,8 +270,9 @@ if __name__ == "__main__":
     # --- Inpainting
     # ---------------------------------------
 
-    arucoBorder = 0.015
+    arucoBorder = 0.007
     arucoThickness = 0.006
+    blurBorder = 0.030
 
     mask3DPoints = np.float32(
         [[-(dataset_arucos.markerSize / 2 + arucoBorder), dataset_arucos.markerSize / 2 + arucoBorder, 0.002],
@@ -235,6 +284,22 @@ if __name__ == "__main__":
          [dataset_arucos.markerSize / 2 + arucoBorder, -(dataset_arucos.markerSize / 2 + arucoBorder), -arucoThickness],
          [-(dataset_arucos.markerSize / 2 + arucoBorder), -(dataset_arucos.markerSize / 2 + arucoBorder), -arucoThickness]])
 
+    blurMask3DPoints = np.float32(
+        [[-(dataset_arucos.markerSize / 2 + arucoBorder + blurBorder), dataset_arucos.markerSize / 2 + arucoBorder + blurBorder, 0.002],
+         [dataset_arucos.markerSize / 2 + arucoBorder + blurBorder, dataset_arucos.markerSize / 2 + arucoBorder + blurBorder, 0.002],
+         [dataset_arucos.markerSize / 2 + arucoBorder + blurBorder, -(dataset_arucos.markerSize / 2 + arucoBorder + blurBorder), 0.002],
+         [-(dataset_arucos.markerSize / 2 + arucoBorder + blurBorder), -(dataset_arucos.markerSize / 2 + arucoBorder + blurBorder), 0.002],
+         [-(dataset_arucos.markerSize / 2 + arucoBorder + blurBorder), dataset_arucos.markerSize / 2 + arucoBorder + blurBorder, -arucoThickness],
+         [dataset_arucos.markerSize / 2 + arucoBorder + blurBorder, dataset_arucos.markerSize / 2 + arucoBorder + blurBorder, -arucoThickness],
+         [dataset_arucos.markerSize / 2 + arucoBorder + blurBorder, -(dataset_arucos.markerSize / 2 + arucoBorder + blurBorder), -arucoThickness],
+         [-(dataset_arucos.markerSize / 2 + arucoBorder + blurBorder), -(dataset_arucos.markerSize / 2 + arucoBorder + blurBorder), -arucoThickness]])
+
+    import pptk
+    import plyfile
+    import glob
+
+    cloudFiles = sorted(glob.glob(args['path_to_images'] + '/*.' + 'ply'))
+
     for i, camera in enumerate(dataset_cameras.cameras):
 
         print("Creating a mask for camera " + camera.name + "...")
@@ -242,6 +307,10 @@ if __name__ == "__main__":
         image = deepcopy(camera.rgb.image)
         height, width, channels = image.shape
         mask = np.zeros((height, width), dtype=np.uint8)
+        ghostMask = np.zeros((height, width), dtype=np.uint8)
+        blurMask = np.zeros((height, width), dtype=np.uint8)
+        world_T_camera = np.linalg.inv(camera.rgb.matrix)
+
 
         # For each ArUco detected in the image
         for key, aruco in camera.rgb.arucos.items():
@@ -250,39 +319,159 @@ if __name__ == "__main__":
             imgpts, jac = cv2.projectPoints(mask3DPoints, aruco.rodrigues, aruco.translation,
                                             dataset_arucos.intrinsics, dataset_arucos.distortion)
 
-            # TODO: project aruco to world and back OR from one camera to another?
-            # for each camera
-            #   for all arucos detected
-            #       create mask world coords: take mask from aruco to world with inv(dataset_arucos.world_T_aruco[id])
-            #
-            # for each camera
-            #   for world2aruco in dataset_arucos.world_T_aruco
-            #       apply world2aruco to mask world coords
+            maskpts, jac = cv2.projectPoints(blurMask3DPoints, aruco.rodrigues, aruco.translation,
+                                             dataset_arucos.intrinsics, dataset_arucos.distortion)
 
             mask = drawMask(mask, imgpts)
 
+            blurMask = drawMask(blurMask, maskpts)
+
             print("\t\t\t Added Aruco " + str(key) + " to the mask;")
 
+        # For Arucos not in the image
+        for key in dataset_arucos.world_T_aruco.iterkeys():
 
-        # Show the masks
+            # aruco = camera.rgb.arucos.get(key)
+
+            aruco_T_world = dataset_arucos.aruco_T_world[key]
+
+            homogenous3DMask = np.ones(shape=(len(mask3DPoints), 4))
+
+            homogenous3DMask[:, :-1] = mask3DPoints
+
+            maskInNewCamera = np.zeros(shape=(len(mask3DPoints), 3))
+
+            for k in range(len(mask3DPoints)):
+
+                maskInNewCamera[k] = np.dot(world_T_camera, np.dot(aruco_T_world, homogenous3DMask[k]))[:3]
+
+            # print("point in new camera = " + str(maskInNewCamera))
+
+            # project 3D points to image plane
+            ghostpts, jac = cv2.projectPoints(maskInNewCamera, (0,0,0), (0,0,0),
+                                            dataset_arucos.intrinsics, dataset_arucos.distortion)
+
+            ghostMask = drawMask(ghostMask, ghostpts)
+
+
+
+        # Show the mask images
         # cv.namedWindow('cam mask ' + str(i), cv.WINDOW_NORMAL)
-        # cv.imshow('cam mask ' + str(i), mask)
-
-        # redImg = np.zeros(image.shape, image.dtype)
-        # redImg[:, :] = (0, 0, 255)
-        # redMask = cv2.bitwise_and(redImg, redImg, mask=mask)
-
-        # inpaintedImage = cv.addWeighted(redMask, 0.5, image, 0.5, 0.0)
+        # cv.imshow('cam mask ' + str(i), ghostMask)
 
         # Apply inpainting algorithm
         inpaintedImage = cv.inpaint(image, mask, 5, cv.INPAINT_TELEA)
         # inpaintedImage = cv.inpaint(image, mask, 5, cv.INPAINT_NS)
+
+        # TODO: add showing this as an argument option
+        # Show the masks over the original image
+        #redImg = np.zeros(image.shape, image.dtype)
+        #redImg[:, :] = (0, 0, 255)
+        #redMask = cv2.bitwise_and(redImg, redImg, mask=mask)
+        #redMaskImage = cv.addWeighted(redMask, 0.5, inpaintedImage, 0.5, 0.0)
+        #cv.namedWindow('Red Mask image ' + str(i), cv.WINDOW_NORMAL)
+        #cv.imshow('Red Mask image ' + str(i), redMaskImage)
+
+
+        # Apply first blur to smooth inpainting
+        # blurredImage = cv.medianBlur(inpaintedImage, 201)
+        # inpaintedImage[np.where(mask == 255)] = blurredImage[np.where(mask == 255)]
+
+        # Apply second blur to smooth out edges
+        blurredImage = cv.medianBlur(inpaintedImage, 201)
+        inpaintedImage[np.where(blurMask == 255)] = blurredImage[np.where(blurMask == 255)]
+
+        # Show the blurred image
+        #cv.namedWindow('Blurred image ' + str(i), cv.WINDOW_NORMAL)
+        #cv.imshow('Blurred image ' + str(i), blurredImage)
+
+        #inpaintedImage = cv.bilateralFilter(inpaintedImage, 9, 75, 75)
+        # inpaintedImage = cv.blur(inpaintedImage, (5,5))
 
         # Show the final image
         cv.namedWindow('Inpainted image ' + str(i), cv.WINDOW_NORMAL)
         # cv.namedWindow('Inpainted image ' + str(i), cv.WINDOW_FULLSCREEN)
         cv.imshow('Inpainted image ' + str(i), inpaintedImage)
 
-    keyPressManager()
+        ###################################################################
+        # Show print .ply file with color
 
-    exit(0)
+        # Read vertices from point cloud
+        imgData = plyfile.PlyData.read(cloudFiles[i])["vertex"]
+        numVertex = len(imgData['x'])
+
+        # create array of 3d points                           add 1 to make homogeneous
+        xyz = np.c_[imgData['x'], imgData['y'], imgData['z'], np.ones(shape=(imgData['z'].size, 1))]
+
+        pointsInOpenCV = np.zeros(shape=(len(xyz), 3))
+
+        pointColour = np.zeros(shape=(len(xyz), 3))
+
+        print("#################################################")
+        print("Camera " + camera.name + "\n")
+
+        # For some awkward reason the local point clouds (ply files) are stored in opengl coordinates.
+        # This matrix puts the coordinate frames back in opencv fashion
+        camera.depth.matrix[0, :] = [1, 0, 0, 0]
+        camera.depth.matrix[1, :] = [0, 0, 1, 0]
+        camera.depth.matrix[2, :] = [0, -1, 0, 0]
+        camera.depth.matrix[3, :] = [0, 0, 0, 1]
+
+        world_T_camera = np.linalg.inv(camera.rgb.matrix)
+
+        for j in range(len(xyz)):
+            pointsInOpenCV[j] = np.dot(world_T_camera, np.dot(camera.depth.matrix, xyz[j]))[:3]
+
+        # print("Points transformed from OpenGl to OpenCV coords = ")
+        # print(pointsInOpenCV)
+
+        # project 3D points from ArUco to image plane
+        pointsInImage, jac = cv2.projectPoints(pointsInOpenCV, (0, 0, 0), (0, 0, 0),
+                                               dataset_arucos.intrinsics, dataset_arucos.distortion)
+
+        # print("Points projected to image = ")
+        # print(pointsInImage)
+
+        image = deepcopy(camera.rgb.image)
+
+        nPointsWithColour = 0
+
+        for j in range(len(pointsInImage)):
+            row = int(round(pointsInImage[j][0][1]))
+            col = int(round(pointsInImage[j][0][0]))
+
+            # if it was projected within the image
+            if 0 <= row < 1080 and 0 <= col < 1920:
+                nPointsWithColour = nPointsWithColour + 1
+
+        file_object = open('pixelcolor' + str(i) + '.ply', "w")
+
+        # write file header information
+        file_object.write('ply' + '\n')
+        file_object.write('format ascii 1.0' + '\n')
+        file_object.write('comment ---' + '\n')
+        file_object.write('element vertex ' + str(nPointsWithColour) + '\n')
+        file_object.write('property float x' + '\n')
+        file_object.write('property float y' + '\n')
+        file_object.write('property float z' + '\n')
+        file_object.write('property uchar red' + '\n')
+        file_object.write('property uchar green' + '\n')
+        file_object.write('property uchar blue' + '\n')
+        file_object.write('element face 0' + '\n')
+        file_object.write('property list uchar uint vertex_indices' + '\n')
+        file_object.write('end_header' + '\n')
+
+        for j in range(len(pointsInImage)):
+            row = int(round(pointsInImage[j][0][1]))
+            col = int(round(pointsInImage[j][0][0]))
+
+            # if it was projected within the image
+            if 0 <= row < 1080 and 0 <= col < 1920:
+                pointColour[j] = inpaintedImage[row, col]
+
+                file_object.write(str(imgData['x'][j]) + ' ' + str(imgData['y'][j]) + ' ' + str(imgData['z'][j]) +
+                                  ' ' + str(int(pointColour[j][2])) + ' ' + str(int(pointColour[j][1])) +
+                                  ' ' + str(int(pointColour[j][0])) + '\n')
+
+    keyPressManager()
+    cv.destroyAllWindows()

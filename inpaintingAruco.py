@@ -2,8 +2,10 @@ import argparse
 import cv2 as cv
 import cv2.aruco
 import numpy as np
+import plyfile
+import glob
+import os
 import OCDatasetLoader.OCDatasetLoader as OCDatasetLoader
-import matplotlib.pyplot as plt
 
 from collections import namedtuple
 from copy import deepcopy
@@ -25,23 +27,6 @@ def keyPressManager():
             exit(0)
 
 
-def drawAxis3D(ax, transform, text, axis_scale=0.1, line_width=1.0):
-    pt_origin = np.array([[0, 0, 0, 1]], dtype=np.float).transpose()
-    x_axis = np.array([[0, 0, 0, 1], [axis_scale, 0, 0, 1]], dtype=np.float).transpose()
-    y_axis = np.array([[0, 0, 0, 1], [0, axis_scale, 0, 1]], dtype=np.float).transpose()
-    z_axis = np.array([[0, 0, 0, 1], [0, 0, axis_scale, 1]], dtype=np.float).transpose()
-
-    pt_origin = np.dot(transform, pt_origin)
-    x_axis = np.dot(transform, x_axis)
-    y_axis = np.dot(transform, y_axis)
-    z_axis = np.dot(transform, z_axis)
-
-    ax.plot(x_axis[0, :], x_axis[1, :], x_axis[2, :], 'r-', linewidth=line_width)
-    ax.plot(y_axis[0, :], y_axis[1, :], y_axis[2, :], 'g-', linewidth=line_width)
-    ax.plot(z_axis[0, :], z_axis[1, :], z_axis[2, :], 'b-', linewidth=line_width)
-    ax.text(pt_origin[0, 0], pt_origin[1, 0], pt_origin[2, 0], text, color='black')  # , size=15, zorder=1
-
-
 def drawMask(img, imgpts):
 
     imgpts = np.int32(imgpts).reshape(-1, 2)
@@ -56,57 +41,9 @@ def drawMask(img, imgpts):
 
     img = cv.drawContours(img, np.hstack([[imgpts[3::-3]],[imgpts[4::3]]]), -1, (255, 255, 255), -3)
 
-    #img = cv.drawContours(img, [imgpts[4:]], -1, (255, 255, 255), -3)
+    # img = cv.drawContours(img, [imgpts[4:]], -1, (255, 255, 255), -3)
 
     return img
-
-
-
-def projectToCamera(intrinsic_matrix, distortion, width, height, pts):
-    """
-    Projects a list of points to the camera defined transform, intrinsics and distortion
-    :param intrinsic_matrix: 3x3 intrinsic camera matrix
-    :param distortion: should be as follows: (k_1, k_2, p_1, p_2[, k_3[, k_4, k_5, k_6]])
-    :param width: the image width
-    :param height: the image height
-    :param pts: a list of point coordinates (in the camera frame) with the following format
-    :return: a list of pixel coordinates with the same lenght as pts
-    """
-
-    _, n_pts = pts.shape
-
-    # Project the 3D points in the camera's frame to image pixels
-    # From https://docs.opencv.org/2.4/modules/calib3d/doc/camera_calibration_and_3d_reconstruction.html
-    pixs = np.zeros((2, n_pts), dtype=np.int)
-
-    k1, k2, p1, p2, k3 = distortion
-    # fx, _, cx, _, fy, cy, _, _, _ = intrinsic_matrix
-    fx = intrinsic_matrix[0, 0]
-    fy = intrinsic_matrix[1, 1]
-    cx = intrinsic_matrix[0, 2]
-    cy = intrinsic_matrix[1, 2]
-
-    x = pts[0, :]
-    y = pts[1, :]
-    z = pts[2, :]
-
-    dists = norm(pts[0:3, :], axis=0)  # compute distances from point to camera
-    xl = np.divide(x, z)  # compute homogeneous coordinates
-    yl = np.divide(y, z)  # compute homogeneous coordinates
-    r2 = xl ** 2 + yl ** 2  # r square (used multiple times bellow)
-    xll = xl * (1 + k1 * r2 + k2 * r2 ** 2 + k3 * r2 ** 3) + 2 * p1 * xl * yl + p2 * (r2 + 2 * xl ** 2)
-    yll = yl * (1 + k1 * r2 + k2 * r2 ** 2 + k3 * r2 ** 3) + p1 * (r2 + 2 * yl ** 2) + 2 * p2 * xl * yl
-    pixs[0, :] = fx * xll + cx
-    pixs[1, :] = fy * yll + cy
-
-    # Compute mask of valid projections
-    valid_z = z > 0
-    valid_xpix = np.logical_and(pixs[0, :] >= 0, pixs[0, :] < width)
-    valid_ypix = np.logical_and(pixs[1, :] >= 0, pixs[1, :] < height)
-    valid_pixs = np.logical_and(valid_z, np.logical_and(valid_xpix, valid_ypix))
-
-    return pixs, valid_pixs, dists
-
 
 
 # -------------------------------------------------------------------------------
@@ -129,9 +66,6 @@ if __name__ == "__main__":
     ap.add_argument("-si", "--skip_images", help="skip images. Useful for fast testing", type=int, default=1)
     ap.add_argument("-vri", "--view_range_image", help="visualize sparse and dense range images", action='store_true',
                     default=False)
-
-    # InpaintingScript arguments
-    # TODO:
 
     args = vars(ap.parse_args())
     print(args)
@@ -294,13 +228,10 @@ if __name__ == "__main__":
          [dataset_arucos.markerSize / 2 + arucoBorder + blurBorder, -(dataset_arucos.markerSize / 2 + arucoBorder + blurBorder), -arucoThickness],
          [-(dataset_arucos.markerSize / 2 + arucoBorder + blurBorder), -(dataset_arucos.markerSize / 2 + arucoBorder + blurBorder), -arucoThickness]])
 
-    import pptk
-    import plyfile
-    import glob
-
+    # Get paths to all the .ply files
     cloudFiles = sorted(glob.glob(args['path_to_images'] + '/*.' + 'ply'))
-    import os
 
+    # Create dir to save coloured point clouds
     directory = 'ColouredClouds'
     if not os.path.exists(directory):
         os.makedirs(directory)
@@ -315,7 +246,6 @@ if __name__ == "__main__":
         ghostMask = np.zeros((height, width), dtype=np.uint8)
         blurMask = np.zeros((height, width), dtype=np.uint8)
         world_T_camera = np.linalg.inv(camera.rgb.matrix)
-
 
         # For each ArUco detected in the image
         for key, aruco in camera.rgb.arucos.items():
@@ -333,10 +263,8 @@ if __name__ == "__main__":
 
             print("\t\t\t Added Aruco " + str(key) + " to the mask;")
 
-        # For Arucos not in the image
+        # Cross-Inpainting - For ArUcos not in the image
         for key in dataset_arucos.world_T_aruco.iterkeys():
-
-            # aruco = camera.rgb.arucos.get(key)
 
             aruco_T_world = dataset_arucos.aruco_T_world[key]
 
@@ -358,8 +286,6 @@ if __name__ == "__main__":
 
             ghostMask = drawMask(ghostMask, ghostpts)
 
-
-
         # Show the mask images
         # cv.namedWindow('cam mask ' + str(i), cv.WINDOW_NORMAL)
         # cv.imshow('cam mask ' + str(i), ghostMask)
@@ -368,15 +294,13 @@ if __name__ == "__main__":
         inpaintedImage = cv.inpaint(image, mask, 5, cv.INPAINT_TELEA)
         # inpaintedImage = cv.inpaint(image, mask, 5, cv.INPAINT_NS)
 
-        # TODO: add showing this as an argument option
         # Show the masks over the original image
-        #redImg = np.zeros(image.shape, image.dtype)
-        #redImg[:, :] = (0, 0, 255)
-        #redMask = cv2.bitwise_and(redImg, redImg, mask=mask)
-        #redMaskImage = cv.addWeighted(redMask, 0.5, inpaintedImage, 0.5, 0.0)
-        #cv.namedWindow('Red Mask image ' + str(i), cv.WINDOW_NORMAL)
-        #cv.imshow('Red Mask image ' + str(i), redMaskImage)
-
+        # redImg = np.zeros(image.shape, image.dtype)
+        # redImg[:, :] = (0, 0, 255)
+        # redMask = cv2.bitwise_and(redImg, redImg, mask=mask)
+        # redMaskImage = cv.addWeighted(redMask, 0.5, inpaintedImage, 0.5, 0.0)
+        # cv.namedWindow('Red Mask image ' + str(i), cv.WINDOW_NORMAL)
+        # cv.imshow('Red Mask image ' + str(i), redMaskImage)
 
         # Apply first blur to smooth inpainting
         blurredImage = cv.medianBlur(inpaintedImage, 201)
@@ -387,8 +311,8 @@ if __name__ == "__main__":
         inpaintedImage[np.where(blurMask == 255)] = blurredImage[np.where(blurMask == 255)]
 
         # Show the blurred image
-        #cv.namedWindow('Blurred image ' + str(i), cv.WINDOW_NORMAL)
-        #cv.imshow('Blurred image ' + str(i), blurredImage)
+        # cv.namedWindow('Blurred image ' + str(i), cv.WINDOW_NORMAL)
+        # cv.imshow('Blurred image ' + str(i), blurredImage)
 
         inpaintedImage = cv.bilateralFilter(inpaintedImage, 9, 75, 75)
         # inpaintedImage = cv.blur(inpaintedImage, (5, 5))
@@ -415,8 +339,8 @@ if __name__ == "__main__":
         print("#################################################")
         print("Camera " + camera.name + "\n")
 
-        # For some awkward reason the local point clouds (ply files) are stored in opengl coordinates.
-        # This matrix puts the coordinate frames back in opencv fashion
+        # The local point clouds (.ply files) are stored in OpenGL coordinates.
+        # This matrix puts the coordinate frames back in OpenCV fashion
         camera.depth.matrix[0, :] = [1, 0, 0, 0]
         camera.depth.matrix[1, :] = [0, 0, 1, 0]
         camera.depth.matrix[2, :] = [0, -1, 0, 0]
@@ -439,6 +363,7 @@ if __name__ == "__main__":
 
         image = deepcopy(camera.rgb.image)
 
+        # Figure out how many points project into the image
         nPointsWithColour = 0
 
         for j in range(len(pointsInImage)):
@@ -449,11 +374,10 @@ if __name__ == "__main__":
             if 0 <= row < 1080 and 0 <= col < 1920:
                 nPointsWithColour = nPointsWithColour + 1
 
+        # Create the .ply file
         name = cloudFiles[i].split('/')[-1]
         name = name.split('.')[0]
-
         print(directory + '/' + name + '_with_colour.ply')
-
         file_object = open(directory + '/' + name + '_with_colour.ply', "w")
 
         # write file header information
@@ -471,6 +395,7 @@ if __name__ == "__main__":
         file_object.write('property list uchar uint vertex_indices' + '\n')
         file_object.write('end_header' + '\n')
 
+        # Actually get the colours for the points projected
         for j in range(len(pointsInImage)):
             row = int(round(pointsInImage[j][0][1]))
             col = int(round(pointsInImage[j][0][0]))

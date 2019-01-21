@@ -1,6 +1,0 @@
-/home/pedro/Documents/VC/cv1718-68809-72583/Lecture07/Code/CMakeFiles/edit_cache.dir
-/home/pedro/Documents/VC/cv1718-68809-72583/Lecture07/Code/CMakeFiles/rebuild_cache.dir
-/home/pedro/Documents/VC/cv1718-68809-72583/Lecture07/Code/CMakeFiles/viewOpenni.dir
-/home/pedro/Documents/VC/cv1718-68809-72583/Lecture07/Code/CMakeFiles/viewFreenect.dir
-/home/pedro/Documents/VC/cv1718-68809-72583/Lecture07/Code/CMakeFiles/reconstruct.dir
-/home/pedro/Documents/VC/cv1718-68809-72583/Lecture07/Code/CMakeFiles/viewCloud.dir

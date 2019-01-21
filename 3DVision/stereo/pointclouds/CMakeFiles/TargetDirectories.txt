@@ -1,3 +1,0 @@
-/home/pedro/Documents/VC/ArUcoInpaintingTool/3DVision/stereo/chessboard/CMakeFiles/edit_cache.dir
-/home/pedro/Documents/VC/ArUcoInpaintingTool/3DVision/stereo/chessboard/CMakeFiles/calib.dir
-/home/pedro/Documents/VC/ArUcoInpaintingTool/3DVision/stereo/chessboard/CMakeFiles/rebuild_cache.dir

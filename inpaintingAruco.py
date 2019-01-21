@@ -374,19 +374,19 @@ if __name__ == "__main__":
 
 
         # Apply first blur to smooth inpainting
-        # blurredImage = cv.medianBlur(inpaintedImage, 201)
-        # inpaintedImage[np.where(mask == 255)] = blurredImage[np.where(mask == 255)]
+        blurredImage = cv.medianBlur(inpaintedImage, 201)
+        inpaintedImage[np.where(mask == 255)] = blurredImage[np.where(mask == 255)]
 
         # Apply second blur to smooth out edges
-        blurredImage = cv.medianBlur(inpaintedImage, 201)
+        blurredImage = cv.medianBlur(inpaintedImage, 51)
         inpaintedImage[np.where(blurMask == 255)] = blurredImage[np.where(blurMask == 255)]
 
         # Show the blurred image
         #cv.namedWindow('Blurred image ' + str(i), cv.WINDOW_NORMAL)
         #cv.imshow('Blurred image ' + str(i), blurredImage)
 
-        #inpaintedImage = cv.bilateralFilter(inpaintedImage, 9, 75, 75)
-        # inpaintedImage = cv.blur(inpaintedImage, (5,5))
+        inpaintedImage = cv.bilateralFilter(inpaintedImage, 9, 75, 75)
+        # inpaintedImage = cv.blur(inpaintedImage, (5, 5))
 
         # Show the final image
         cv.namedWindow('Inpainted image ' + str(i), cv.WINDOW_NORMAL)
@@ -444,7 +444,7 @@ if __name__ == "__main__":
             if 0 <= row < 1080 and 0 <= col < 1920:
                 nPointsWithColour = nPointsWithColour + 1
 
-        file_object = open('pixelcolor' + str(i) + '.ply', "w")
+        file_object = open(cloudFiles[i].split('.')[0] + '_with_colour.ply', "w")
 
         # write file header information
         file_object.write('ply' + '\n')

@@ -299,6 +299,11 @@ if __name__ == "__main__":
     import glob
 
     cloudFiles = sorted(glob.glob(args['path_to_images'] + '/*.' + 'ply'))
+    import os
+
+    directory = 'ColouredClouds'
+    if not os.path.exists(directory):
+        os.makedirs(directory)
 
     for i, camera in enumerate(dataset_cameras.cameras):
 
@@ -444,12 +449,10 @@ if __name__ == "__main__":
             if 0 <= row < 1080 and 0 <= col < 1920:
                 nPointsWithColour = nPointsWithColour + 1
 
-        import os
-        directory = 'ColouredClouds'
-        if not os.path.exists(directory):
-            os.makedirs(directory)
+        name = cloudFiles[i].split('/')[-1]
+        name = name.split('.')[0]
 
-        name = (cloudFiles[i].split('.')[0]).split('/')[-1]
+        print(directory + '/' + name + '_with_colour.ply')
 
         file_object = open(directory + '/' + name + '_with_colour.ply', "w")
 
@@ -479,6 +482,7 @@ if __name__ == "__main__":
                 file_object.write(str(imgData['x'][j]) + ' ' + str(imgData['y'][j]) + ' ' + str(imgData['z'][j]) +
                                   ' ' + str(int(pointColour[j][2])) + ' ' + str(int(pointColour[j][1])) +
                                   ' ' + str(int(pointColour[j][0])) + '\n')
+        file_object.close()
 
     keyPressManager()
     cv.destroyAllWindows()

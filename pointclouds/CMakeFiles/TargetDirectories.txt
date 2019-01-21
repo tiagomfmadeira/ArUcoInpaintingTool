@@ -1,0 +1,3 @@
+/home/pedro/Documents/VC/ArUcoInpaintingTool/pointclouds/CMakeFiles/edit_cache.dir
+/home/pedro/Documents/VC/ArUcoInpaintingTool/pointclouds/CMakeFiles/calib.dir
+/home/pedro/Documents/VC/ArUcoInpaintingTool/pointclouds/CMakeFiles/rebuild_cache.dir

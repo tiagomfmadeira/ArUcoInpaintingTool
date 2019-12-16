@@ -5,7 +5,9 @@ import numpy as np
 import plyfile
 import glob
 import os
+import shutil
 import OCDatasetLoader.OCDatasetLoader as OCDatasetLoader
+import OCDatasetLoader.OCArucoDetector as OCArucoDetector
 
 from collections import namedtuple
 from copy import deepcopy
@@ -16,34 +18,34 @@ from copy import deepcopy
 
 
 def keyPressManager():
-    print('keyPressManager.\nPress "c" to continue or "q" to abort.')
-    while True:
-        key = cv.waitKey(15)
-        if key == ord('c'):
-            print('Pressed "c". Continuing.')
-            break
-        elif key == ord('q'):
-            print('Pressed "q". Aborting.')
-            exit(0)
+	print('keyPressManager.\nPress "c" to continue or "q" to abort.')
+	while True:
+		key = cv.waitKey(15)
+		if key == ord('c'):
+			print('Pressed "c". Continuing.')
+			break
+		elif key == ord('q'):
+			print('Pressed "q". Aborting.')
+			exit(0)
 
 
 def drawMask(img, imgpts):
 
-    imgpts = np.int32(imgpts).reshape(-1, 2)
+	imgpts = np.int32(imgpts).reshape(-1, 2)
 
-    img = cv.drawContours(img, [imgpts[:4]], -1, (255, 255, 255), -3)
+	img = cv.drawContours(img, [imgpts[:4]], -1, (255, 255, 255), -3)
 
-    img = cv.drawContours(img, np.hstack([[imgpts[4:6]],[imgpts[1::-1]]]), -1, (255, 255, 255), -3)
+	img = cv.drawContours(img, np.hstack([[imgpts[4:6]],[imgpts[1::-1]]]), -1, (255, 255, 255), -3)
 
-    img = cv.drawContours(img, np.hstack([[imgpts[5:7]],[imgpts[2:0:-1]]]), -1, (255, 255, 255), -3)
+	img = cv.drawContours(img, np.hstack([[imgpts[5:7]],[imgpts[2:0:-1]]]), -1, (255, 255, 255), -3)
 
-    img = cv.drawContours(img, np.hstack([[imgpts[6:8]],[imgpts[3:1:-1]]]), -1, (255, 255, 255), -3)
+	img = cv.drawContours(img, np.hstack([[imgpts[6:8]],[imgpts[3:1:-1]]]), -1, (255, 255, 255), -3)
 
-    img = cv.drawContours(img, np.hstack([[imgpts[3::-3]],[imgpts[4::3]]]), -1, (255, 255, 255), -3)
+	img = cv.drawContours(img, np.hstack([[imgpts[3::-3]],[imgpts[4::3]]]), -1, (255, 255, 255), -3)
 
-    # img = cv.drawContours(img, [imgpts[4:]], -1, (255, 255, 255), -3)
+	# img = cv.drawContours(img, [imgpts[4:]], -1, (255, 255, 255), -3)
 
-    return img
+	return img
 
 
 # -------------------------------------------------------------------------------
@@ -51,363 +53,279 @@ def drawMask(img, imgpts):
 # -------------------------------------------------------------------------------
 if __name__ == "__main__":
 
-    # ---------------------------------------
-    # --- Parse command line argument
-    # ---------------------------------------
-    ap = argparse.ArgumentParser()
-
-    # Dataset loader arguments
-    ap.add_argument("-p", "--path_to_images", help="path to the folder that contains the OC dataset", required=True)
-    ap.add_argument("-ext", "--image_extension", help="extension of the image files, e.g., jpg or png", default='jpg')
-    ap.add_argument("-m", "--mesh_filename", help="full filename to input obj file, i.e. the 3D model", required=True)
-    ap.add_argument("-i", "--path_to_intrinsics", help="path to intrinsics yaml file", required=True)
-    ap.add_argument("-ucci", "--use_color_corrected_images", help="Use previously color corrected images",
-                    action='store_true', default=False)
-    ap.add_argument("-si", "--skip_images", help="skip images. Useful for fast testing", type=int, default=1)
-    ap.add_argument("-vri", "--view_range_image", help="visualize sparse and dense range images", action='store_true',
-                    default=False)
-
-    args = vars(ap.parse_args())
-    print(args)
-
-    # ---------------------------------------
-    # --- INITIALIZATION
-    # ---------------------------------------
-    dataset_loader = OCDatasetLoader.Loader(args)
-    dataset_cameras = dataset_loader.loadDataset()
-    num_cameras = len(dataset_cameras.cameras)
-    print("#########################################################################################################\n")
-    print("Loaded " + str(num_cameras) + " cameras to the dataset!\n")
-
-    # ---------------------------------------
-    # --- Utility functions
-    # ---------------------------------------
-    def matrixToRodrigues(T):
-        rods, _ = cv.Rodrigues(T[0:3, 0:3])
-        rods = rods.transpose()
-        return rods[0]
-
-
-    def rodriguesToMatrix(r):
-        rod = np.array(r, dtype=np.float)
-        matrix = cv.Rodrigues(rod)
-        return matrix[0]
-
-
-    def traslationRodriguesToTransform(translation, rodrigues):
-        R = rodriguesToMatrix(rodrigues)
-        T = np.zeros((4, 4), dtype=np.float)
-        T[0:3, 0:3] = R
-        T[0:3, 3] = translation
-        T[3, 3] = 1
-        return T
-
-    # ---------------------------------------
-    # --- Detect ARUCOS
-    # ---------------------------------------
-
-    ArucoT = namedtuple('ArucoT', 'id center translation rodrigues aruco2camera camera2aruco')
-
-    class ArucoConfiguration:
-        def __init__(self):
-            pass
-
-    dataset_arucos = ArucoConfiguration()
-    dataset_arucos.aruco_dict = cv.aruco.Dictionary_get(cv.aruco.DICT_ARUCO_ORIGINAL)
-    dataset_arucos.parameters = cv.aruco.DetectorParameters_create()
-
-    dataset_arucos.markerSize = 0.082
-    dataset_arucos.distortion = np.array(dataset_cameras.cameras[0].rgb.camera_info.D)
-    dataset_arucos.intrinsics = np.reshape(dataset_cameras.cameras[0].rgb.camera_info.K, (3, 3))
-    dataset_arucos.world_T_aruco = {}
-    dataset_arucos.aruco_T_world = {}
-
-    # For each camera
-    for i, camera in enumerate(dataset_cameras.cameras):
-        camera.rgb.arucos = {}
-        print("In camera " + camera.name + " there is:")
-
-        image = cv.cvtColor(camera.rgb.image, cv.COLOR_BGR2GRAY)
-        corners, ids, _ = cv.aruco.detectMarkers(image, dataset_arucos.aruco_dict,
-                                                 parameters=dataset_arucos.parameters)
-
-        if ids is None:
-            print("\t\t\t No ArUco detected!")
-            continue
-
-        # Estimate pose of each marker
-        rotationVecs, translationVecs, _ = cv.aruco.estimatePoseSingleMarkers(corners, dataset_arucos.markerSize,
-                                                                               dataset_arucos.intrinsics,
-                                                                               dataset_arucos.distortion)
-        # For each ArUco marker detected in the camera
-        for j, id in enumerate(ids):
-
-            # OpenCV format hack
-            id = id[0]
-
-            print("\t\t\t Aruco " + str(id) + ";")
-
-            # OpenCV format hack
-            my_corners = corners[j][0][:]
-
-            # separate corners into x and y coordinates
-            x = []
-            y = []
-            for corner in my_corners:
-                x.append(corner[0])
-                y.append(corner[1])
-
-            # Get tuple with center of marker
-            center = (np.average(x), np.average(y))
-
-            rodrigues = np.array(rotationVecs[j][0])
-            translation = np.array(translationVecs[j][0])
-            aruco2camera = traslationRodriguesToTransform(translation, rodrigues)
-
-            camera2aruco = np.linalg.inv(aruco2camera)
-
-            # Create and assign the ArUco object to data structure
-            camera.rgb.arucos[id] = (ArucoT(id, center, translation, rodrigues, aruco2camera, camera2aruco))
-
-            # Add only if there is still not an estimate (made by another camera)
-            if id not in dataset_arucos.world_T_aruco:
-                dataset_arucos.world_T_aruco[id] = np.dot(camera.rgb.matrix, camera.rgb.arucos[id].camera2aruco)
+	# ---------------------------------------
+	# --- Parse command line argument
+	# ---------------------------------------
+	ap = argparse.ArgumentParser()
+	ap = OCDatasetLoader.addArguments(ap) # Dataset loader arguments
+	args = vars(ap.parse_args())
+	print(args)
+
+	# ---------------------------------------
+	# --- INITIALIZATION
+	# ---------------------------------------
+
+	dataset_loader = OCDatasetLoader.Loader(args)
+	dataset_cameras = dataset_loader.loadDataset()
+
+	aruco_detector = OCArucoDetector.ArucoDetector(args)
+
+	dataset_arucos, dataset_cameras = aruco_detector.detect(dataset_cameras)
+	print("\nDataset_cameras contains " + str(len(dataset_cameras.cameras)) + " cameras")
+
+	# Extra
+	dataset_arucos.distortion = np.array(dataset_cameras.cameras[0].rgb.camera_info.D)
+	dataset_arucos.intrinsics = np.reshape(dataset_cameras.cameras[0].rgb.camera_info.K, (3, 3))
+	dataset_arucos.world_T_aruco = {}
+	dataset_arucos.aruco_T_world = {}
 
-            if id not in dataset_arucos.aruco_T_world:
-                dataset_arucos.aruco_T_world[id] = np.dot(camera.rgb.matrix, camera.rgb.arucos[id].aruco2camera)
+	for i, camera in enumerate(dataset_cameras.cameras):
+		for key, aruco in camera.rgb.aruco_detections.items():
 
-    # Display information over the ArUcos
-    font = cv.FONT_HERSHEY_SIMPLEX
-    for i, camera in enumerate(dataset_cameras.cameras):
-        image = deepcopy(camera.rgb.image)
-        corners, ids, _ = cv.aruco.detectMarkers(image, dataset_arucos.aruco_dict,
-                                                 parameters=dataset_arucos.parameters)
+			# Add only if there is still not an estimate (made by another camera)
+			if key not in dataset_arucos.world_T_aruco:
+				dataset_arucos.world_T_aruco[key] = np.dot(camera.rgb.matrix, np.linalg.inv(camera.rgb.aruco_detections[key].aruco_T_camera))
 
-        # Draw axis and write info
-        for key, aruco in camera.rgb.arucos.items():
-            cv.aruco.drawAxis(image, dataset_arucos.intrinsics, dataset_arucos.distortion, aruco.rodrigues,
-                               aruco.translation, 0.05)
-            cv.putText(image, "Id:" + str(aruco.id), aruco.center, font, 1, (0, 255, 0), 2, cv.LINE_AA)
+			if key not in dataset_arucos.aruco_T_world:
+				dataset_arucos.aruco_T_world[key] = np.dot(camera.rgb.matrix, camera.rgb.aruco_detections[key].aruco_T_camera)
 
-        # Draw the outer square
-        cv.aruco.drawDetectedMarkers(image, corners)
+	# ---------------------------------------
+	# --- Inpainting
+	# ---------------------------------------
 
-        # Show the image
-        cv.namedWindow('cam' + str(i), cv.WINDOW_NORMAL)
-        cv.imshow('cam' + str(i), image)
+	arucoBorder = 0.017
+	arucoThickness = 0.006
+	blurBorder = 0.035
 
-    print("Displaying aruco detections for all images.")
-    keyPressManager()
-    cv.destroyAllWindows()
+	mask3DPoints = np.float32(
+		[[-(dataset_arucos.markerSize / 2 + arucoBorder), dataset_arucos.markerSize / 2 + arucoBorder, 0.002],
+		 [dataset_arucos.markerSize / 2 + arucoBorder, dataset_arucos.markerSize / 2 + arucoBorder, 0.002],
+		 [dataset_arucos.markerSize / 2 + arucoBorder, -(dataset_arucos.markerSize / 2 + arucoBorder), 0.002],
+		 [-(dataset_arucos.markerSize / 2 + arucoBorder), -(dataset_arucos.markerSize / 2 + arucoBorder), 0.002],
+		 [-(dataset_arucos.markerSize / 2 + arucoBorder), dataset_arucos.markerSize / 2 + arucoBorder, -arucoThickness],
+		 [dataset_arucos.markerSize / 2 + arucoBorder, dataset_arucos.markerSize / 2 + arucoBorder, -arucoThickness],
+		 [dataset_arucos.markerSize / 2 + arucoBorder, -(dataset_arucos.markerSize / 2 + arucoBorder), -arucoThickness],
+		 [-(dataset_arucos.markerSize / 2 + arucoBorder), -(dataset_arucos.markerSize / 2 + arucoBorder), -arucoThickness]])
 
-    # ---------------------------------------
-    # --- Inpainting
-    # ---------------------------------------
+	blurMask3DPoints = np.float32(
+		[[-(dataset_arucos.markerSize / 2 + arucoBorder + blurBorder), dataset_arucos.markerSize / 2 + arucoBorder + blurBorder, 0.002],
+		 [dataset_arucos.markerSize / 2 + arucoBorder + blurBorder, dataset_arucos.markerSize / 2 + arucoBorder + blurBorder, 0.002],
+		 [dataset_arucos.markerSize / 2 + arucoBorder + blurBorder, -(dataset_arucos.markerSize / 2 + arucoBorder + blurBorder), 0.002],
+		 [-(dataset_arucos.markerSize / 2 + arucoBorder + blurBorder), -(dataset_arucos.markerSize / 2 + arucoBorder + blurBorder), 0.002],
+		 [-(dataset_arucos.markerSize / 2 + arucoBorder + blurBorder), dataset_arucos.markerSize / 2 + arucoBorder + blurBorder, -arucoThickness],
+		 [dataset_arucos.markerSize / 2 + arucoBorder + blurBorder, dataset_arucos.markerSize / 2 + arucoBorder + blurBorder, -arucoThickness],
+		 [dataset_arucos.markerSize / 2 + arucoBorder + blurBorder, -(dataset_arucos.markerSize / 2 + arucoBorder + blurBorder), -arucoThickness],
+		 [-(dataset_arucos.markerSize / 2 + arucoBorder + blurBorder), -(dataset_arucos.markerSize / 2 + arucoBorder + blurBorder), -arucoThickness]])
 
-    arucoBorder = 0.007
-    arucoThickness = 0.006
-    blurBorder = 0.030
+	# Create dir to save coloured point clouds
+	directory = 'ColouredClouds'
+	if os.path.exists(directory):
+		# Delete old folder
+		shutil.rmtree(directory)
+	os.makedirs(directory)
 
-    mask3DPoints = np.float32(
-        [[-(dataset_arucos.markerSize / 2 + arucoBorder), dataset_arucos.markerSize / 2 + arucoBorder, 0.002],
-         [dataset_arucos.markerSize / 2 + arucoBorder, dataset_arucos.markerSize / 2 + arucoBorder, 0.002],
-         [dataset_arucos.markerSize / 2 + arucoBorder, -(dataset_arucos.markerSize / 2 + arucoBorder), 0.002],
-         [-(dataset_arucos.markerSize / 2 + arucoBorder), -(dataset_arucos.markerSize / 2 + arucoBorder), 0.002],
-         [-(dataset_arucos.markerSize / 2 + arucoBorder), dataset_arucos.markerSize / 2 + arucoBorder, -arucoThickness],
-         [dataset_arucos.markerSize / 2 + arucoBorder, dataset_arucos.markerSize / 2 + arucoBorder, -arucoThickness],
-         [dataset_arucos.markerSize / 2 + arucoBorder, -(dataset_arucos.markerSize / 2 + arucoBorder), -arucoThickness],
-         [-(dataset_arucos.markerSize / 2 + arucoBorder), -(dataset_arucos.markerSize / 2 + arucoBorder), -arucoThickness]])
+	for i, camera in enumerate(dataset_cameras.cameras):
 
-    blurMask3DPoints = np.float32(
-        [[-(dataset_arucos.markerSize / 2 + arucoBorder + blurBorder), dataset_arucos.markerSize / 2 + arucoBorder + blurBorder, 0.002],
-         [dataset_arucos.markerSize / 2 + arucoBorder + blurBorder, dataset_arucos.markerSize / 2 + arucoBorder + blurBorder, 0.002],
-         [dataset_arucos.markerSize / 2 + arucoBorder + blurBorder, -(dataset_arucos.markerSize / 2 + arucoBorder + blurBorder), 0.002],
-         [-(dataset_arucos.markerSize / 2 + arucoBorder + blurBorder), -(dataset_arucos.markerSize / 2 + arucoBorder + blurBorder), 0.002],
-         [-(dataset_arucos.markerSize / 2 + arucoBorder + blurBorder), dataset_arucos.markerSize / 2 + arucoBorder + blurBorder, -arucoThickness],
-         [dataset_arucos.markerSize / 2 + arucoBorder + blurBorder, dataset_arucos.markerSize / 2 + arucoBorder + blurBorder, -arucoThickness],
-         [dataset_arucos.markerSize / 2 + arucoBorder + blurBorder, -(dataset_arucos.markerSize / 2 + arucoBorder + blurBorder), -arucoThickness],
-         [-(dataset_arucos.markerSize / 2 + arucoBorder + blurBorder), -(dataset_arucos.markerSize / 2 + arucoBorder + blurBorder), -arucoThickness]])
+		if True:
+			print("Creating a mask for camera " + camera.name + "...")
 
-    # Get paths to all the .ply files
-    cloudFiles = sorted(glob.glob(args['path_to_images'] + '/*.' + 'ply'))
+			image = deepcopy(camera.rgb.image)
+			height, width, channels = image.shape
+			mask = np.zeros((height, width), dtype=np.uint8)
+			crossmask = np.zeros((height, width), dtype=np.uint8)
+			ghostMask = np.zeros((height, width), dtype=np.uint8)
+			blurMask = np.zeros((height, width), dtype=np.uint8)
+			world_T_camera = np.linalg.inv(camera.rgb.matrix)
 
-    # Create dir to save coloured point clouds
-    directory = 'ColouredClouds'
-    if not os.path.exists(directory):
-        os.makedirs(directory)
+			inpainted_arucos = []
 
-    for i, camera in enumerate(dataset_cameras.cameras):
+			# For each ArUco detected in the image
+			for key, aruco in camera.rgb.aruco_detections.items():
 
-        print("Creating a mask for camera " + camera.name + "...")
+				# project 3D points to image plane
+				imgpts, jac = cv2.projectPoints(mask3DPoints, aruco.rodrigues, aruco.translation,
+												dataset_arucos.intrinsics, dataset_arucos.distortion)
 
-        image = deepcopy(camera.rgb.image)
-        height, width, channels = image.shape
-        mask = np.zeros((height, width), dtype=np.uint8)
-        ghostMask = np.zeros((height, width), dtype=np.uint8)
-        blurMask = np.zeros((height, width), dtype=np.uint8)
-        world_T_camera = np.linalg.inv(camera.rgb.matrix)
+				maskpts, jac = cv2.projectPoints(blurMask3DPoints, aruco.rodrigues, aruco.translation,
+												 dataset_arucos.intrinsics, dataset_arucos.distortion)
 
-        # For each ArUco detected in the image
-        for key, aruco in camera.rgb.arucos.items():
+				mask = drawMask(mask, imgpts)
 
-            # project 3D points to image plane
-            imgpts, jac = cv2.projectPoints(mask3DPoints, aruco.rodrigues, aruco.translation,
-                                            dataset_arucos.intrinsics, dataset_arucos.distortion)
+				blurMask = drawMask(blurMask, maskpts)
 
-            maskpts, jac = cv2.projectPoints(blurMask3DPoints, aruco.rodrigues, aruco.translation,
-                                             dataset_arucos.intrinsics, dataset_arucos.distortion)
+				#print("\t\t\t Added Aruco " + str(key) + " to the mask;")
 
-            mask = drawMask(mask, imgpts)
+				inpainted_arucos.extend([key])
 
-            blurMask = drawMask(blurMask, maskpts)
+			print('ArUcos in actual detection= ' + str(inpainted_arucos))
 
-            print("\t\t\t Added Aruco " + str(key) + " to the mask;")
+			# Show the masks over the original image
+			redImg = np.zeros(image.shape, image.dtype)
+			redImg[:, :] = (0, 0, 255)
+			redMask = cv2.bitwise_and(redImg, redImg, mask=mask)
+			redMaskImage = cv.addWeighted(redMask, 0.5, image, 0.5, 0.0)
 
-        # Cross-Inpainting - For ArUcos not in the image
-        for key in dataset_arucos.world_T_aruco.iterkeys():
+			# Cross-Inpainting - For ArUcos not in the image
+			for key in dataset_arucos.arucos.iterkeys():
 
-            aruco_T_world = dataset_arucos.aruco_T_world[key]
+				if key in inpainted_arucos:
+					continue
 
-            homogenous3DMask = np.ones(shape=(len(mask3DPoints), 4))
+				aruco_T_world = dataset_arucos.arucos[key].matrix
 
-            homogenous3DMask[:, :-1] = mask3DPoints
+				homogenous3DMask = np.ones(shape=(len(mask3DPoints), 4))
 
-            maskInNewCamera = np.zeros(shape=(len(mask3DPoints), 3))
+				homogenous3DMask[:, :-1] = mask3DPoints
 
-            for k in range(len(mask3DPoints)):
+				maskInNewCamera = np.zeros(shape=(len(mask3DPoints), 3))
 
-                maskInNewCamera[k] = np.dot(world_T_camera, np.dot(aruco_T_world, homogenous3DMask[k]))[:3]
+				for k in range(len(mask3DPoints)):
 
-            # print("point in new camera = " + str(maskInNewCamera))
+					maskInNewCamera[k] = np.dot(world_T_camera, np.dot(aruco_T_world, homogenous3DMask[k]))[:3]
 
-            # project 3D points to image plane
-            ghostpts, jac = cv2.projectPoints(maskInNewCamera, (0,0,0), (0,0,0),
-                                            dataset_arucos.intrinsics, dataset_arucos.distortion)
+				# print("point in new camera = " + str(maskInNewCamera))
 
-            ghostMask = drawMask(ghostMask, ghostpts)
+				# project 3D points to image plane
+				ghostpts, jac = cv2.projectPoints(maskInNewCamera, (0,0,0), (0,0,0),
+												dataset_arucos.intrinsics, dataset_arucos.distortion)
 
-        # Show the mask images
-        # cv.namedWindow('cam mask ' + str(i), cv.WINDOW_NORMAL)
-        # cv.imshow('cam mask ' + str(i), ghostMask)
+				mask = drawMask(mask, ghostpts)
+				crossmask = drawMask(crossmask, ghostpts)
 
-        # Apply inpainting algorithm
-        inpaintedImage = cv.inpaint(image, mask, 5, cv.INPAINT_TELEA)
-        # inpaintedImage = cv.inpaint(image, mask, 5, cv.INPAINT_NS)
+			blueImg = np.zeros(image.shape, image.dtype)
+			blueImg[:, :] = (255, 100, 0)
+			blueMask = cv2.bitwise_and(blueImg, blueImg, mask=crossmask)
+			redMaskImage = cv.addWeighted(blueMask, 0.5, redMaskImage, 0.5, 0.0)
 
-        # Show the masks over the original image
-        # redImg = np.zeros(image.shape, image.dtype)
-        # redImg[:, :] = (0, 0, 255)
-        # redMask = cv2.bitwise_and(redImg, redImg, mask=mask)
-        # redMaskImage = cv.addWeighted(redMask, 0.5, inpaintedImage, 0.5, 0.0)
-        # cv.namedWindow('Red Mask image ' + str(i), cv.WINDOW_NORMAL)
-        # cv.imshow('Red Mask image ' + str(i), redMaskImage)
+			# Show the mask images
+			# cv.namedWindow('cam mask ' + str(i), cv.WINDOW_NORMAL)
+			# cv.imshow('cam mask ' + str(i), ghostMask)
 
-        # Apply first blur to smooth inpainting
-        blurredImage = cv.medianBlur(inpaintedImage, 201)
-        inpaintedImage[np.where(mask == 255)] = blurredImage[np.where(mask == 255)]
+			# Apply inpainting algorithm
+			inpaintedImage = cv.inpaint(image, mask, 5, cv.INPAINT_TELEA)
+			# inpaintedImage = cv.inpaint(image, mask, 5, cv.INPAINT_NS)
 
-        # Apply second blur to smooth out edges
-        blurredImage = cv.medianBlur(inpaintedImage, 51)
-        inpaintedImage[np.where(blurMask == 255)] = blurredImage[np.where(blurMask == 255)]
+			# Show the first inpaint
+			# cv.namedWindow('First inpaint ' + str(i), cv.WINDOW_NORMAL)
+			# cv.imshow('First inpaint ' + str(i), inpaintedImage)
 
-        # Show the blurred image
-        # cv.namedWindow('Blurred image ' + str(i), cv.WINDOW_NORMAL)
-        # cv.imshow('Blurred image ' + str(i), blurredImage)
+			# Show masks over images
+			cv.namedWindow('Red Mask image ' + str(i), cv.WINDOW_NORMAL)
+			cv.imshow('Red Mask image ' + str(i), redMaskImage)
 
-        inpaintedImage = cv.bilateralFilter(inpaintedImage, 9, 75, 75)
-        # inpaintedImage = cv.blur(inpaintedImage, (5, 5))
+			# Apply first blur to smooth inpainting
+			blurredImage = cv.medianBlur(inpaintedImage, 201)
+			inpaintedImage[np.where(mask == 255)] = blurredImage[np.where(mask == 255)]
 
-        # Show the final image
-        cv.namedWindow('Inpainted image ' + str(i), cv.WINDOW_NORMAL)
-        # cv.namedWindow('Inpainted image ' + str(i), cv.WINDOW_FULLSCREEN)
-        cv.imshow('Inpainted image ' + str(i), inpaintedImage)
+			# Show the blurred image
+			# cv.namedWindow('Blurred image 1 ' + str(i), cv.WINDOW_NORMAL)
+			# cv.imshow('Blurred image 1 ' + str(i), blurredImage)
 
-        ###################################################################
-        # Show print .ply file with color
+			# Apply second blur to smooth out edges
+			blurredImage = cv.medianBlur(inpaintedImage, 51)
+			inpaintedImage[np.where(blurMask == 255)] = blurredImage[np.where(blurMask == 255)]
 
-        # Read vertices from point cloud
-        imgData = plyfile.PlyData.read(cloudFiles[i])["vertex"]
-        numVertex = len(imgData['x'])
+			# Show the blurred image
+			# cv.namedWindow('Blurred image 2 ' + str(i), cv.WINDOW_NORMAL)
+			# cv.imshow('Blurred image 2 ' + str(i), blurredImage)
 
-        # create array of 3d points                           add 1 to make homogeneous
-        xyz = np.c_[imgData['x'], imgData['y'], imgData['z'], np.ones(shape=(imgData['z'].size, 1))]
+			# Overall blur??
+			inpaintedImage = cv.bilateralFilter(inpaintedImage, 9, 75, 75)
+			# inpaintedImage = cv.blur(inpaintedImage, (5, 5))
 
-        pointsInOpenCV = np.zeros(shape=(len(xyz), 3))
+			# Show the final image
+			cv.namedWindow('Inpainted image ' + str(i), cv.WINDOW_NORMAL)
+			cv.namedWindow('Inpainted image ' + str(i), cv.WINDOW_FULLSCREEN)
+			cv.imshow('Inpainted image ' + str(i), inpaintedImage)
+		else:
+			#just color in the original images
+			inpaintedImage = deepcopy(camera.rgb.image)
+		###################################################################
+		# Show print .ply file with color
 
-        pointColour = np.zeros(shape=(len(xyz), 3))
+		# Read vertices from point cloud
+		ply_input_filename = args['path_to_images'] + '/' + camera.name.zfill(8) + '.ply'
+		imgData = plyfile.PlyData.read(ply_input_filename)["vertex"]
+		numVertex = len(imgData['x'])
 
-        print("#################################################")
-        print("Camera " + camera.name + "\n")
+		# create array of 3d points						   add 1 to make homogeneous
+		xyz = np.c_[imgData['x'], imgData['y'], imgData['z'], np.ones(shape=(imgData['z'].size, 1))]
 
-        # The local point clouds (.ply files) are stored in OpenGL coordinates.
-        # This matrix puts the coordinate frames back in OpenCV fashion
-        camera.depth.matrix[0, :] = [1, 0, 0, 0]
-        camera.depth.matrix[1, :] = [0, 0, 1, 0]
-        camera.depth.matrix[2, :] = [0, -1, 0, 0]
-        camera.depth.matrix[3, :] = [0, 0, 0, 1]
+		pointsInOpenCV = np.zeros(shape=(len(xyz), 3))
 
-        world_T_camera = np.linalg.inv(camera.rgb.matrix)
+		pointColour = np.zeros(shape=(len(xyz), 3))
 
-        for j in range(len(xyz)):
-            pointsInOpenCV[j] = np.dot(world_T_camera, np.dot(camera.depth.matrix, xyz[j]))[:3]
+		print("#################################################")
+		print("Camera " + camera.name + "\n")
 
-        # print("Points transformed from OpenGl to OpenCV coords = ")
-        # print(pointsInOpenCV)
+		# The local point clouds (.ply files) are stored in OpenGL coordinates.
+		# This matrix puts the coordinate frames back in OpenCV fashion
+		camera.depth.matrix[0, :] = [1, 0, 0, 0]
+		camera.depth.matrix[1, :] = [0, 0, 1, 0]
+		camera.depth.matrix[2, :] = [0, -1, 0, 0]
+		camera.depth.matrix[3, :] = [0, 0, 0, 1]
 
-        # project 3D points from ArUco to image plane
-        pointsInImage, jac = cv2.projectPoints(pointsInOpenCV, (0, 0, 0), (0, 0, 0),
-                                               dataset_arucos.intrinsics, dataset_arucos.distortion)
+		world_T_camera = np.linalg.inv(camera.rgb.matrix)
 
-        # print("Points projected to image = ")
-        # print(pointsInImage)
+		for j in range(len(xyz)):
+			pointsInOpenCV[j] = np.dot(world_T_camera, np.dot(camera.depth.matrix, xyz[j]))[:3]
 
-        image = deepcopy(camera.rgb.image)
+		# print("Points transformed from OpenGl to OpenCV coords = ")
+		# print(pointsInOpenCV)
 
-        # Figure out how many points project into the image
-        nPointsWithColour = 0
+		# project 3D points from ArUco to image plane
+		pointsInImage, jac = cv2.projectPoints(pointsInOpenCV, (0, 0, 0), (0, 0, 0),
+											   dataset_arucos.intrinsics, dataset_arucos.distortion)
 
-        for j in range(len(pointsInImage)):
-            row = int(round(pointsInImage[j][0][1]))
-            col = int(round(pointsInImage[j][0][0]))
+		# print("Points projected to image = ")
+		# print(pointsInImage)
 
-            # if it was projected within the image
-            if 0 <= row < 1080 and 0 <= col < 1920:
-                nPointsWithColour = nPointsWithColour + 1
+		image = deepcopy(camera.rgb.image)
 
-        # Create the .ply file
-        name = cloudFiles[i].split('/')[-1]
-        name = name.split('.')[0]
-        print(directory + '/' + name + '_with_colour.ply')
-        file_object = open(directory + '/' + name + '_with_colour.ply', "w")
+		# Figure out how many points project into the image
+		nPointsWithColour = 0
 
-        # write file header information
-        file_object.write('ply' + '\n')
-        file_object.write('format ascii 1.0' + '\n')
-        file_object.write('comment ---' + '\n')
-        file_object.write('element vertex ' + str(nPointsWithColour) + '\n')
-        file_object.write('property float x' + '\n')
-        file_object.write('property float y' + '\n')
-        file_object.write('property float z' + '\n')
-        file_object.write('property uchar red' + '\n')
-        file_object.write('property uchar green' + '\n')
-        file_object.write('property uchar blue' + '\n')
-        file_object.write('element face 0' + '\n')
-        file_object.write('property list uchar uint vertex_indices' + '\n')
-        file_object.write('end_header' + '\n')
+		for j in range(len(pointsInImage)):
+			row = int(round(pointsInImage[j][0][1]))
+			col = int(round(pointsInImage[j][0][0]))
 
-        # Actually get the colours for the points projected
-        for j in range(len(pointsInImage)):
-            row = int(round(pointsInImage[j][0][1]))
-            col = int(round(pointsInImage[j][0][0]))
+			# if it was projected within the image
+			if 0 <= row < 1080 and 0 <= col < 1920:
+				nPointsWithColour = nPointsWithColour + 1
 
-            # if it was projected within the image
-            if 0 <= row < 1080 and 0 <= col < 1920:
-                pointColour[j] = inpaintedImage[row, col]
+		# Create the .ply file
+		ply_output_filename = directory + '/' + camera.name.zfill(8) + '_with_colour.ply'
+		file_object = open(ply_output_filename, "w")
+		print(ply_output_filename)
 
-                file_object.write(str(imgData['x'][j]) + ' ' + str(imgData['y'][j]) + ' ' + str(imgData['z'][j]) +
-                                  ' ' + str(int(pointColour[j][2])) + ' ' + str(int(pointColour[j][1])) +
-                                  ' ' + str(int(pointColour[j][0])) + '\n')
-        file_object.close()
+		# write file header information
+		file_object.write('ply' + '\n')
+		file_object.write('format ascii 1.0' + '\n')
+		file_object.write('comment ---' + '\n')
+		file_object.write('element vertex ' + str(nPointsWithColour) + '\n')
+		file_object.write('property float x' + '\n')
+		file_object.write('property float y' + '\n')
+		file_object.write('property float z' + '\n')
+		file_object.write('property uchar red' + '\n')
+		file_object.write('property uchar green' + '\n')
+		file_object.write('property uchar blue' + '\n')
+		file_object.write('element face 0' + '\n')
+		file_object.write('property list uchar uint vertex_indices' + '\n')
+		file_object.write('end_header' + '\n')
 
-    keyPressManager()
-    cv.destroyAllWindows()
+		# Actually get the colours for the points projected
+		for j in range(len(pointsInImage)):
+			row = int(round(pointsInImage[j][0][1]))
+			col = int(round(pointsInImage[j][0][0]))
+
+			# if it was projected within the image
+			if 0 <= row < 1080 and 0 <= col < 1920:
+				pointColour[j] = inpaintedImage[row, col]
+
+				file_object.write(str(imgData['x'][j]) + ' ' + str(imgData['y'][j]) + ' ' + str(imgData['z'][j]) +
+								  ' ' + str(int(pointColour[j][2])) + ' ' + str(int(pointColour[j][1])) +
+								  ' ' + str(int(pointColour[j][0])) + '\n')
+		file_object.close()
+		print("Done!\n")
+
+	keyPressManager()

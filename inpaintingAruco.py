@@ -126,6 +126,8 @@ if __name__ == "__main__":
 
 	for i, camera in enumerate(dataset_cameras.cameras):
 
+		# Actually perform the inpainting. <False> only used for convenience when colouring with original texture (to compare results). 
+		# TODO: add arg for this flag
 		if True:
 			print("Creating a mask for camera " + camera.name + "...")
 
@@ -142,7 +144,7 @@ if __name__ == "__main__":
 			# For each ArUco detected in the image
 			for key, aruco in camera.rgb.aruco_detections.items():
 
-				# project 3D points to image plane
+				# Project 3D points to image plane
 				imgpts, jac = cv2.projectPoints(mask3DPoints, aruco.rodrigues, aruco.translation,
 												dataset_arucos.intrinsics, dataset_arucos.distortion)
 
@@ -238,7 +240,7 @@ if __name__ == "__main__":
 			cv.namedWindow('Inpainted image ' + str(i), cv.WINDOW_FULLSCREEN)
 			cv.imshow('Inpainted image ' + str(i), inpaintedImage)
 		else:
-			#just color in the original images
+			# Just color in with the original images
 			inpaintedImage = deepcopy(camera.rgb.image)
 		###################################################################
 		# Show print .ply file with color
